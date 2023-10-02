@@ -246,9 +246,7 @@ func (device *Device) RoutineReceiveIncoming(
 		for peer, elems := range elemsByPeer {
 			if peer.isRunning.Load() {
 				peer.queue.inbound.c <- elems
-				for _, elem := range *elems {
-					device.queue.decryption.c <- elem
-				}
+				device.queue.decryption.c <- elems
 			} else {
 				for _, elem := range *elems {
 					device.PutMessageBuffer(elem.buffer)
@@ -267,26 +265,28 @@ func (device *Device) RoutineDecryption(id int) {
 	defer device.log.Verbosef("Routine: decryption worker %d - stopped", id)
 	device.log.Verbosef("Routine: decryption worker %d - started", id)
 
-	for elem := range device.queue.decryption.c {
-		// split message into fields
-		counter := elem.packet[MessageTransportOffsetCounter:MessageTransportOffsetContent]
-		content := elem.packet[MessageTransportOffsetContent:]
+	for elems := range device.queue.decryption.c {
+		for _, elem := range *elems {
+			// split message into fields
+			counter := elem.packet[MessageTransportOffsetCounter:MessageTransportOffsetContent]
+			content := elem.packet[MessageTransportOffsetContent:]
 
-		// decrypt and release to consumer
-		var err error
-		elem.counter = binary.LittleEndian.Uint64(counter)
-		// copy counter to nonce
-		binary.LittleEndian.PutUint64(nonce[0x4:0xc], elem.counter)
-		elem.packet, err = elem.keypair.receive.Open(
-			content[:0],
-			nonce[:],
-			content,
-			nil,
-		)
-		if err != nil {
-			elem.packet = nil
+			// decrypt and release to consumer
+			var err error
+			elem.counter = binary.LittleEndian.Uint64(counter)
+			// copy counter to nonce
+			binary.LittleEndian.PutUint64(nonce[0x4:0xc], elem.counter)
+			elem.packet, err = elem.keypair.receive.Open(
+				content[:0],
+				nonce[:],
+				content,
+				nil,
+			)
+			if err != nil {
+				elem.packet = nil
+			}
+			elem.Unlock()
 		}
-		elem.Unlock()
 	}
 }
 
